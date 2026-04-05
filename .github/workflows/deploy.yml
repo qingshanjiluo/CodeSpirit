@@ -18,21 +18,17 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: app/package-lock.json
+        cache: 'npm'                 # 自动使用根目录的 package-lock.json
+        # cache-dependency-path 不需要指定，默认就是 ./package-lock.json
         
     - name: Install Dependencies
-      run: |
-        cd app
-        npm ci
-        
+      run: npm ci                    # 直接在根目录执行
+      
     - name: Build
-      run: |
-        cd app
-        npm run build
-        
+      run: npm run build             # 构建输出到 dist/（Vite 默认）
+      
     - name: Deploy to GitHub Pages
       uses: JamesIves/github-pages-deploy-action@v4
       with:
-        folder: app/dist
+        folder: dist                 # 构建输出的目录
         branch: gh-pages
