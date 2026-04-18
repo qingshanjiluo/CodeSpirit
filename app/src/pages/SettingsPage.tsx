@@ -3,12 +3,12 @@
  */
 
 import { useState, useEffect } from 'react';
-import { 
-  Settings, 
-  User, 
-  Key, 
-  Database, 
-  Palette, 
+import {
+  Settings,
+  User,
+  Key,
+  Database,
+  Palette,
   Globe,
   Volume2,
   Moon,
@@ -20,7 +20,11 @@ import {
   Upload,
   Plus,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Activity,
+  Loader2,
+  Server,
+  Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,6 +36,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -42,11 +53,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { get, put, resetAllData, STORES } from '@/db';
-import { getAIConfig, updateAIConfig } from '@/ai';
+import { getAIConfig, updateAIConfig, testAPI, PROVIDER_PRESETS } from '@/ai';
 import { exportAllData, importBackup } from '@/utils/exportImport';
 import { storage, readFile } from '@/utils';
 import type { AppSettings, UserProfile, AIConfiguration } from '@/types';
 import type { PageType } from '@/App';
+import type { AIProvider } from '@/ai/providers';
 import { toast } from 'sonner';
 
 interface SettingsPageProps {
@@ -60,6 +72,14 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
   const [newApiKey, setNewApiKey] = useState('');
   const [showResetDialog, setShowResetDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // API 测试状态
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [testResult, setTestResult] = useState<{
+    latency?: number;
+    response?: string;
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -134,7 +154,7 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
 
   const handleAddApiKey = async () => {
     if (!newApiKey.trim() || !aiConfig) return;
-    
+
     try {
       const updatedKeys = [...aiConfig.apiKeys, newApiKey.trim()];
       await updateAIConfig({ apiKeys: updatedKeys });
@@ -149,7 +169,7 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
 
   const handleRemoveApiKey = async (index: number) => {
     if (!aiConfig) return;
-    
+
     try {
       const updatedKeys = aiConfig.apiKeys.filter((_, i) => i !== index);
       await updateAIConfig({ apiKeys: updatedKeys });
@@ -158,6 +178,43 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
     } catch (error) {
       console.error('[SettingsPage] Remove API key error:', error);
       toast.error('删除失败');
+    }
+  };
+
+  const handleProviderChange = (provider: AIProvider) => {
+    if (!aiConfig) return;
+    const preset = PROVIDER_PRESETS[provider];
+    const updated: AIConfiguration = {
+      ...aiConfig,
+      provider,
+      // 切换 provider 时，如果是预设 provider 且用户没自定义过，则自动填充默认值
+      endpoint: preset ? preset.defaultEndpoint : aiConfig.endpoint,
+      model: preset ? preset.defaultModel : aiConfig.model,
+    };
+    setAiConfig(updated);
+  };
+
+  const handleTestAPI = async () => {
+    setTestStatus('testing');
+    setTestResult(null);
+    try {
+      const result = await testAPI();
+      if (result.success) {
+        setTestStatus('success');
+        setTestResult({
+          latency: result.latency,
+          response: result.response
+        });
+        toast.success(`API 测试成功 (${result.latency}ms)`);
+      } else {
+        setTestStatus('error');
+        setTestResult({ error: result.error });
+        toast.error(`API 测试失败: ${result.error}`);
+      }
+    } catch (error) {
+      setTestStatus('error');
+      setTestResult({ error: error instanceof Error ? error.message : '未知错误' });
+      toast.error('API 测试异常');
     }
   };
 
@@ -204,6 +261,11 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
       </div>
     );
   }
+
+  const providerOptions = Object.entries(PROVIDER_PRESETS).map(([key, cfg]) => ({
+    value: key as AIProvider,
+    label: cfg.name
+  }));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -354,15 +416,43 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
               <CardTitle>AI 配置</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Provider 选择 */}
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <Server className="w-4 h-4" />
+                  AI 服务商
+                </Label>
+                <Select
+                  value={aiConfig.provider}
+                  onValueChange={(v) => handleProviderChange(v as AIProvider)}
+                >
+                  <SelectTrigger className="bg-slate-800/50 border-slate-700/50">
+                    <SelectValue placeholder="选择 AI 服务商" />
+                  </SelectTrigger>
+                  <SelectContent className="glass-panel">
+                    {providerOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-slate-400">
+                  选择服务商后会自动填充默认端点和模型，你也可以手动修改
+                </p>
+              </div>
+
+              <Separator />
+
               {/* API 端点 */}
               <div className="space-y-2">
                 <Label>API 端点</Label>
                 <Input
                   value={aiConfig.endpoint}
                   onChange={(e) => setAiConfig({ ...aiConfig, endpoint: e.target.value })}
-                  placeholder="https://api.deepseek.com/v1/chat/completions"
+                  placeholder="https://api.example.com/v1"
                 />
-                <p className="text-sm text-slate-400">支持 OpenAI 兼容的 API 端点</p>
+                <p className="text-sm text-slate-400">API 请求的目标地址</p>
               </div>
 
               {/* 模型选择 */}
@@ -371,7 +461,7 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
                 <Input
                   value={aiConfig.model}
                   onChange={(e) => setAiConfig({ ...aiConfig, model: e.target.value })}
-                  placeholder="deepseek-chat"
+                  placeholder="model-name"
                 />
               </div>
 
@@ -391,7 +481,7 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
                     <Plus className="w-4 h-4" />
                   </Button>
                 </div>
-                
+
                 {/* 密钥列表 */}
                 <div className="space-y-2 mt-4">
                   {aiConfig.apiKeys.map((key, index) => (
@@ -435,11 +525,67 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
                 />
               </div>
 
-              <Button 
+              {/* API 测试 */}
+              <div className="space-y-3 p-4 rounded-lg bg-slate-800/30 border border-slate-700/30">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-emerald-400" />
+                    <Label className="cursor-pointer">API 连接测试</Label>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTestAPI}
+                    disabled={testStatus === 'testing' || aiConfig.apiKeys.length === 0}
+                  >
+                    {testStatus === 'testing' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        测试中...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        测试 API
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {testStatus === 'success' && testResult && (
+                  <div className="p-3 rounded bg-emerald-500/10 border border-emerald-500/20 text-sm">
+                    <div className="flex items-center gap-2 text-emerald-400 font-medium">
+                      <Activity className="w-4 h-4" />
+                      连接成功 ({testResult.latency}ms)
+                    </div>
+                    {testResult.response && (
+                      <p className="mt-1 text-slate-400">响应: {testResult.response}</p>
+                    )}
+                  </div>
+                )}
+
+                {testStatus === 'error' && testResult && (
+                  <div className="p-3 rounded bg-red-500/10 border border-red-500/20 text-sm">
+                    <div className="flex items-center gap-2 text-red-400 font-medium">
+                      <AlertTriangle className="w-4 h-4" />
+                      连接失败
+                    </div>
+                    <p className="mt-1 text-slate-400">{testResult.error}</p>
+                  </div>
+                )}
+
+                {aiConfig.apiKeys.length === 0 && (
+                  <p className="text-sm text-amber-400">
+                    请先添加 API 密钥后再进行测试
+                  </p>
+                )}
+              </div>
+
+              <Button
                 onClick={async () => {
                   await updateAIConfig(aiConfig);
                   toast.success('AI配置已保存');
-                }} 
+                }}
                 className="w-full"
               >
                 <Save className="w-4 h-4 mr-2" />
@@ -513,7 +659,7 @@ export function SettingsPage({ onNavigate }: SettingsPageProps) {
               <div className="flex items-center justify-between p-4 rounded-lg bg-slate-800/50">
                 <div>
                   <h4 className="font-medium">导出数据</h4>
-                  <p className="text-sm text-slate-400">将所有数据导出为 JSON 文件</p>
+                  <p className="text-sm text-slate-400">导出课程、作品、笔记、进度、API配置等所有数据</p>
                 </div>
                 <Button onClick={handleExportData}>
                   <Download className="w-4 h-4 mr-2" />

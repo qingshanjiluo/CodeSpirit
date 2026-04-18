@@ -2,11 +2,11 @@
  * CodeSpirit 课程列表页面
  */
 
-import { useState, useEffect } from 'react';
-import { 
-  BookOpen, 
-  Plus, 
-  Search, 
+import { useState, useEffect, useRef } from 'react';
+import {
+  BookOpen,
+  Plus,
+  Search,
   MoreVertical,
   Play,
   Trash2,
@@ -15,7 +15,8 @@ import {
   Share2,
   Clock,
   CheckCircle2,
-  Lock
+  Lock,
+  Upload
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,7 +41,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { getAll, remove, put, STORES } from '@/db';
-import { exportCourse } from '@/utils/exportImport';
+import { exportCourse, importCourse } from '@/utils/exportImport';
 import type { Course, Chapter } from '@/types';
 import type { PageType } from '@/App';
 import { toast } from 'sonner';
@@ -55,6 +56,7 @@ export function CoursesPage({ onNavigate }: CoursesPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteCourseId, setDeleteCourseId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadCourses();
@@ -113,6 +115,20 @@ export function CoursesPage({ onNavigate }: CoursesPageProps) {
       console.error('[CoursesPage] Export error:', error);
       toast.error('导出失败');
     }
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await importCourse(file);
+      toast.success('课程导入成功');
+      await loadCourses();
+    } catch (error) {
+      console.error('[CoursesPage] Import error:', error);
+      toast.error('导入失败: ' + (error instanceof Error ? error.message : '未知错误'));
+    }
+    e.target.value = '';
   };
 
   const filteredCourses = courses.filter(course =>
@@ -188,6 +204,17 @@ export function CoursesPage({ onNavigate }: CoursesPageProps) {
               className="pl-10 w-64 bg-slate-800/50 border-slate-700"
             />
           </div>
+          <input
+            type="file"
+            accept=".lingcheng,.json,.encrypted"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleImport}
+          />
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+            <Upload className="w-4 h-4 mr-2" />
+            导入课程
+          </Button>
           <Button onClick={() => onNavigate('create-course')}>
             <Plus className="w-4 h-4 mr-2" />
             新建课程

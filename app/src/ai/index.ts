@@ -1,10 +1,20 @@
 /**
  * CodeSpirit AI 模块
  * 支持多API密钥轮询、错误重试、调用统计
- * 优先适配 DeepSeek API
+ * 支持 DeepSeek / OpenAI / Anthropic / Gemini / Ollama / Kimi / Qwen
  */
 
 import { get, put, STORES } from '@/db';
+import type { AIProvider } from './providers';
+import {
+  PROVIDER_PRESETS,
+  buildHeaders,
+  buildBody,
+  buildUrl,
+  parseResponse,
+  parseStreamChunk,
+} from './providers';
+export { type AIProvider, PROVIDER_PRESETS } from './providers';
 
 // AI 调用统计（存储在 localStorage 中便于快速访问）
 const STATS_KEY = 'codespirit_ai_stats';
@@ -19,7 +29,7 @@ interface AIStats {
 }
 
 interface AIConfig {
-  provider: string;
+  provider: AIProvider;
   endpoint: string;
   model: string;
   apiKeys: string[];
@@ -85,38 +95,24 @@ export async function getAIConfig(): Promise<AIConfig> {
   if (config?.value) {
     console.log('[AI] 使用数据库中的配置');
     aiConfig = config.value;
-    
-    // 验证并修复端点URL
-    if (aiConfig.endpoint && !aiConfig.endpoint.includes('/chat/completions')) {
-      console.warn('[AI] 检测到不完整的端点URL，自动修复:', aiConfig.endpoint);
-      
-      // 修复端点URL
-      if (aiConfig.endpoint.includes('v1')) {
-        // 如果是v1端点，添加/chat/completions
-        aiConfig.endpoint = aiConfig.endpoint.replace(/\/?$/, '/chat/completions');
-      } else if (aiConfig.endpoint.includes('api.deepseek.com')) {
-        // 如果是deepseek域名，使用标准端点
-        aiConfig.endpoint = 'https://api.deepseek.com/chat/completions';
-      } else {
-        // 其他情况，使用完整端点
-        aiConfig.endpoint = 'https://api.deepseek.com/chat/completions';
-      }
-      
-      console.log('[AI] 修复后的端点:', aiConfig.endpoint);
-      
-      // 自动保存修复后的配置
-      try {
-        await updateAIConfig({ endpoint: aiConfig.endpoint });
-        console.log('[AI] 已自动保存修复后的端点配置');
-      } catch (error) {
-        console.error('[AI] 自动保存配置失败:', error);
-      }
+    const provider = aiConfig.provider || 'deepseek';
+    const preset = PROVIDER_PRESETS[provider as keyof typeof PROVIDER_PRESETS];
+    // 仅当端点为空时才使用默认值
+    if (!aiConfig.endpoint && preset) {
+      aiConfig.endpoint = preset.defaultEndpoint;
+    }
+    if (!aiConfig.model && preset) {
+      aiConfig.model = preset.defaultModel;
+    }
+    // 确保 keyIndex 是有效数字
+    if (typeof aiConfig.keyIndex !== 'number' || !Number.isFinite(aiConfig.keyIndex)) {
+      aiConfig.keyIndex = 0;
     }
   } else {
     console.log('[AI] 使用默认配置');
     aiConfig = {
       provider: 'deepseek',
-      endpoint: 'https://api.deepseek.com/chat/completions',
+      endpoint: 'https://api.deepseek.com/v1',
       model: 'deepseek-chat',
       apiKeys: [],
       temperature: 0.7,
@@ -125,8 +121,13 @@ export async function getAIConfig(): Promise<AIConfig> {
     };
   }
   
-  // 确保端点格式正确
-  if (!aiConfig.endpoint.startsWith('https://')) {
+  // 兜底：确保 endpoint 始终有值
+  if (!aiConfig.endpoint) {
+    aiConfig.endpoint = 'https://api.deepseek.com/v1';
+  }
+  
+  // 确保端点格式正确（除 localhost/Ollama 外）
+  if (!aiConfig.endpoint.startsWith('http://localhost') && !aiConfig.endpoint.startsWith('https://')) {
     aiConfig.endpoint = 'https://' + aiConfig.endpoint;
   }
   
@@ -221,27 +222,30 @@ export async function callAI(options: CallAIOptions): Promise<string> {
     throw new Error('未配置API密钥，请先在设置中添加API密钥');
   }
 
+  const provider = config.provider || 'deepseek';
   const maxRetries = config.apiKeys.length * 2;
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const keyIndex = (config.keyIndex + attempt) % config.apiKeys.length;
+    const currentKeyIndex = Number.isFinite(config.keyIndex) ? config.keyIndex : 0;
+    const keyIndex = (currentKeyIndex + attempt) % config.apiKeys.length;
     const apiKey = config.apiKeys[keyIndex];
 
     try {
-      const response = await fetch(config.endpoint, {
+      const url = buildUrl(config.endpoint);
+      const headers = buildHeaders(apiKey);
+      const body = buildBody(
+        config.model,
+        options.messages,
+        options.temperature ?? config.temperature,
+        options.maxTokens ?? config.maxTokens,
+        options.stream ?? false
+      );
+
+      const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: config.model,
-          messages: options.messages,
-          temperature: options.temperature ?? config.temperature,
-          max_tokens: options.maxTokens ?? config.maxTokens,
-          stream: options.stream ?? false
-        })
+        headers,
+        body: JSON.stringify(body)
       });
 
       if (!response.ok) {
@@ -253,7 +257,6 @@ export async function callAI(options: CallAIOptions): Promise<string> {
           errorMessage = errorData.error?.message || errorData.message || errorMessage;
           errorDetails = JSON.stringify(errorData, null, 2);
         } catch {
-          // 如果无法解析JSON，使用状态文本
           errorMessage = `${response.status} ${response.statusText}`;
         }
         
@@ -269,45 +272,27 @@ export async function callAI(options: CallAIOptions): Promise<string> {
       }
 
       const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || '';
-      const tokens = data.usage?.total_tokens;
+      const parsed = parseResponse(data);
 
       // 更新统计
-      updateStats(tokens);
+      updateStats(parsed.tokens);
 
       // 更新密钥索引（轮询）
       await updateAIConfig({ keyIndex: (keyIndex + 1) % config.apiKeys.length });
 
-      return content;
+      return parsed.content;
     } catch (error) {
       lastError = error as Error;
       const status = (error as any).status;
       
-      console.warn(`[AI] 调用失败 (key ${keyIndex}, attempt ${attempt + 1}):`, error);
+      console.warn(`[AI] 调用失败 (provider ${provider}, key ${keyIndex}, attempt ${attempt + 1}):`, error);
 
-      // 如果是404错误，可能是端点问题，提供更详细的错误信息
-      if (status === 404) {
-        console.error('[AI] API端点返回404，请检查：');
-        console.error('1. API端点URL是否正确:', config.endpoint);
-        console.error('2. DeepSeek API文档: https://platform.deepseek.com/api-docs/');
-        console.error('3. 当前模型:', config.model);
-        
-        // 如果是端点问题，尝试使用备用端点
-        if (config.endpoint.includes('v1/')) {
-          console.warn('[AI] 尝试使用非v1端点...');
-          const altEndpoint = config.endpoint.replace('v1/', '');
-          console.warn('[AI] 备用端点:', altEndpoint);
-        }
-      }
-
-      // 如果是密钥问题，尝试下一个密钥
       if (status === 401 || status === 403 ||
           lastError.message?.includes('401') || lastError.message?.includes('403')) {
         console.warn(`[AI] 密钥 ${keyIndex} 无效，尝试下一个密钥`);
         continue;
       }
 
-      // 网络错误，短暂延迟后重试
       if (lastError.message?.includes('network') || lastError.message?.includes('fetch') ||
           lastError.message?.includes('Network') || lastError.message?.includes('Failed to fetch')) {
         console.warn(`[AI] 网络错误，${attempt + 1}秒后重试`);
@@ -315,12 +300,10 @@ export async function callAI(options: CallAIOptions): Promise<string> {
         continue;
       }
 
-      // 如果是404错误且没有备用端点，直接抛出
       if (status === 404) {
         break;
       }
 
-      // 其他错误，短暂延迟后重试
       await sleep(1000 * (attempt + 1));
       continue;
     }
@@ -358,7 +341,7 @@ async function handleStreamResponse(
 
           try {
             const parsed = JSON.parse(data);
-            const content = parsed.choices?.[0]?.delta?.content || '';
+            const content = parseStreamChunk(parsed);
             if (content) {
               fullContent += content;
               onStream(content);
@@ -644,13 +627,14 @@ export async function chatWithAI(
   const profile = await get<{ value: { aiRoleName: string } }>(STORES.USER_DATA, 'profile');
   const aiName = profile?.value?.aiRoleName || 'AI导师';
 
+  const hasSystem = messages.some(m => m.role === 'system');
   const systemMessage: Message = {
     role: 'system',
     content: `你是${aiName}，一个专业、耐心、友好的编程导师。\n\n教学原则：\n1. 用通俗易懂的语言解释复杂概念\n2. 提供具体的代码示例\n3. 鼓励学生自主思考，不直接给答案\n4. 根据学生的问题深度调整回答详细程度\n5. 适时提供学习建议和资源推荐`
   };
 
   return callAI({
-    messages: [systemMessage, ...messages],
+    messages: hasSystem ? messages : [systemMessage, ...messages],
     temperature: 0.7,
     stream: !!onStream,
     onStream
@@ -945,5 +929,79 @@ export async function generateStreamingDialogue(
       content: `首先，我们来了解一下${topic}的基本概念。`,
       delay: 800
     });
+  }
+}
+
+/**
+ * 测试 API 连通性
+ */
+export async function testAPI(): Promise<{
+  success: boolean;
+  latency: number;
+  model: string;
+  provider: string;
+  response?: string;
+  error?: string;
+}> {
+  const startTime = performance.now();
+  try {
+    const config = await getAIConfig();
+    if (!config.apiKeys.length) {
+      return {
+        success: false,
+        latency: 0,
+        model: config.model || '',
+        provider: config.provider || 'deepseek',
+        error: '未配置 API 密钥'
+      };
+    }
+
+    const provider = config.provider || 'deepseek';
+    const apiKey = config.apiKeys[config.keyIndex || 0];
+    const endpoint = config.endpoint || 'https://api.deepseek.com/v1';
+    const url = buildUrl(endpoint);
+    const headers = buildHeaders(apiKey);
+    const body = buildBody(config.model,
+      [{ role: 'user', content: 'Say "Hello" in one word.' }],
+      0.3, 16, false
+    );
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+
+    const latency = Math.round(performance.now() - startTime);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        latency,
+        model: config.model,
+        provider,
+        error: errorData.error?.message || `${response.status} ${response.statusText}`
+      };
+    }
+
+    const data = await response.json();
+    const parsed = parseResponse(data);
+    return {
+      success: true,
+      latency,
+      model: config.model,
+      provider,
+      response: parsed.content
+    };
+  } catch (error) {
+    const latency = Math.round(performance.now() - startTime);
+    return {
+      success: false,
+      latency,
+      model: '',
+      provider: '',
+      error: error instanceof Error ? error.message : '未知错误'
+    };
   }
 }

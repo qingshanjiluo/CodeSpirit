@@ -108,12 +108,20 @@ function App() {
           }
         }));
 
-        // 注册 Service Worker
+        // 注册 Service Worker（生产环境）
         if ('serviceWorker' in navigator) {
-          navigator.serviceWorker
-            .register('/sw.js')
-            .then(reg => console.log('[App] SW registered:', reg))
-            .catch(err => console.error('[App] SW registration failed:', err));
+          if (import.meta.env.DEV) {
+            // 开发模式：注销所有 Service Worker，避免缓存干扰
+            navigator.serviceWorker.getRegistrations().then(regs => {
+              regs.forEach(reg => reg.unregister());
+              console.log('[App] DEV mode: SW unregistered');
+            });
+          } else {
+            navigator.serviceWorker
+              .register('/sw.js')
+              .then(reg => console.log('[App] SW registered:', reg))
+              .catch(err => console.error('[App] SW registration failed:', err));
+          }
         }
       } catch (error) {
         console.error('[App] Initialization error:', error);
@@ -262,8 +270,8 @@ function App() {
           />
 
           {/* 页面内容 */}
-          <main className="flex-1 p-6 overflow-auto">
-            <div className="max-w-7xl mx-auto">
+          <main className="flex-1 overflow-hidden">
+            <div className="h-full">
               {renderPage()}
             </div>
           </main>

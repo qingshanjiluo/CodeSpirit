@@ -557,3 +557,70 @@
 .prose-invert a:hover {
   color: #0ea5e9;
 }
+
+/* ===== 学习页面四区布局优化 ===== */
+
+/* 隐藏滚动条但保留滚动功能 */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 代码编辑器行号背景 */
+.code-editor-bg {
+  background-image: linear-gradient(transparent 95%, rgba(51, 65, 85, 0.3) 95%);
+  background-size: 100% 24px;
+}
+
+/* 区域卡片统一样式 */
+.region-card {
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* 区域头部 */
+.region-header {
+  background: rgba(15, 23, 42, 0.6);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+/* 阶段标签激活态 */
+.stage-tag-active {
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3), 0 0 12px rgba(99, 102, 241, 0.15);
+}
+
+/* 消息气泡 */
+.message-bubble-user {
+  background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+}
+
+.message-bubble-ai {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+/* 响应式：移动端堆叠 */
+@media (max-width: 768px) {
+  .learning-grid {
+    flex-direction: column !important;
+  }
+  .learning-grid > div {
+    width: 100% !important;
+    flex: none !important;
+  }
+}
+
+/* 折叠按钮悬浮效果 */
+.panel-collapse-btn {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.region-card:hover .panel-collapse-btn {
+  opacity: 1;
+}

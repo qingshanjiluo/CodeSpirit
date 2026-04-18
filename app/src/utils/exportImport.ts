@@ -14,12 +14,16 @@ export async function exportCourse(
   chapters: Chapter[],
   password?: string
 ): Promise<void> {
+  const allDialogues = await getAll(STORES.DIALOGUES);
+  const courseDialogues = allDialogues.filter((d: any) => d.courseId === course.id);
+
   const exportData = {
     version: 1,
     exportDate: new Date().toISOString(),
     type: 'single-course',
     course,
-    chapters
+    chapters,
+    dialogues: courseDialogues
   };
 
   let content = JSON.stringify(exportData, null, 2);
@@ -66,16 +70,26 @@ export async function exportCourses(
 export async function exportAllData(password?: string): Promise<void> {
   const userData = await getAll(STORES.USER_DATA);
   const statsItem = userData.find((d: any) => d.key === 'stats');
+  const settingsItem = userData.find((d: any) => d.key === 'settings');
+  const profileItem = userData.find((d: any) => d.key === 'profile');
+  
+  // 获取 AI 配置
+  const aiConfigItem = await getAll(STORES.AI_CONFIG);
+  const aiConfig = aiConfigItem.find((d: any) => d.key === 'aiConfig');
   
   const data = {
-    version: 1,
+    version: 2,
     exportDate: new Date().toISOString(),
     courses: await getAll(STORES.COURSES),
     chapters: await getAll(STORES.CHAPTERS),
     notes: await getAll(STORES.NOTES),
     works: await getAll(STORES.WORKS),
     progress: await getAll(STORES.PROGRESS),
-    stats: statsItem ? (statsItem as any).value : {}
+    dialogues: await getAll(STORES.DIALOGUES),
+    stats: statsItem ? (statsItem as any).value : {},
+    settings: settingsItem ? (settingsItem as any).value : undefined,
+    profile: profileItem ? (profileItem as any).value : undefined,
+    aiConfig: aiConfig ? (aiConfig as any).value : undefined
   };
 
   let content = JSON.stringify(data, null, 2);
@@ -142,6 +156,17 @@ export async function importCourse(
     await put(STORES.CHAPTERS, chapter);
   }
 
+  // 导入对话记录
+  if (data.dialogues && Array.isArray(data.dialogues)) {
+    for (const dialogue of data.dialogues) {
+      await put(STORES.DIALOGUES, {
+        ...dialogue,
+        id: generateId(),
+        courseId: newCourseId
+      });
+    }
+  }
+
   return { course, chapters };
 }
 
@@ -154,7 +179,7 @@ export async function importBackup(
   password?: string
 ): Promise<void> {
   const content = await readFile(file);
-  let data: ExportData;
+  let data: any;
 
   try {
     data = JSON.parse(content);
@@ -194,6 +219,58 @@ export async function importBackup(
     for (const work of data.works) {
       await put(STORES.WORKS, { ...work, id: generateId() });
     }
+  }
+
+  if (data.progress) {
+    for (const p of data.progress) {
+      await put(STORES.PROGRESS, { ...p, id: generateId() });
+    }
+  }
+
+  if (data.dialogues) {
+    for (const dialogue of data.dialogues) {
+      await put(STORES.DIALOGUES, { ...dialogue, id: generateId() });
+    }
+  }
+
+  // 导入设置
+  if (data.settings) {
+    await put(STORES.USER_DATA, {
+      key: 'settings',
+      category: 'settings',
+      value: data.settings,
+      updatedAt: Date.now()
+    });
+  }
+
+  // 导入用户资料
+  if (data.profile) {
+    await put(STORES.USER_DATA, {
+      key: 'profile',
+      category: 'profile',
+      value: data.profile,
+      updatedAt: Date.now()
+    });
+  }
+
+  // 导入 AI 配置
+  if (data.aiConfig) {
+    await put(STORES.AI_CONFIG, {
+      key: 'aiConfig',
+      category: 'aiConfig',
+      value: data.aiConfig,
+      updatedAt: Date.now()
+    });
+  }
+
+  // 导入统计数据
+  if (data.stats) {
+    await put(STORES.USER_DATA, {
+      key: 'stats',
+      category: 'stats',
+      value: data.stats,
+      updatedAt: Date.now()
+    });
   }
 }
 

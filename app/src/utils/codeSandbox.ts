@@ -1,9 +1,11 @@
 /**
  * CodeSpirit 代码沙箱执行模块
- * 支持 JavaScript 和 Python（Pyodide）
+ * 支持 JavaScript、Python（Pyodide）和多文件 HTML 项目
  */
 
-import type { CodeExecutionResult } from '@/types';
+import type { CodeExecutionResult, VirtualProject } from '@/types';
+import { simulateCodeExecution } from '@/ai';
+import { buildHtmlEntry } from './vfs';
 
 // Pyodide 实例
 let pyodideInstance: any = null;
@@ -171,6 +173,36 @@ export function executeHTML(code: string): CodeExecutionResult {
 }
 
 /**
+ * 执行多文件项目（HTML 项目）
+ */
+export function executeProject(project: VirtualProject): CodeExecutionResult {
+  const startTime = performance.now();
+  try {
+    const html = buildHtmlEntry(project);
+    if (!html) {
+      return {
+        success: false,
+        output: '',
+        error: '项目中未找到 HTML 入口文件',
+        executionTime: Math.round(performance.now() - startTime)
+      };
+    }
+    return {
+      success: true,
+      output: html,
+      executionTime: Math.round(performance.now() - startTime)
+    };
+  } catch (e: any) {
+    return {
+      success: false,
+      output: '',
+      error: e.message || String(e),
+      executionTime: Math.round(performance.now() - startTime)
+    };
+  }
+}
+
+/**
  * 通用代码执行入口
  */
 export async function executeCode(
@@ -193,12 +225,23 @@ export async function executeCode(
       result = executeHTML(code);
       break;
     default:
-      result = {
-        success: false,
-        output: '',
-        error: `暂不支持 ${language} 语言`,
-        executionTime: 0
-      };
+      try {
+        const startTime = performance.now();
+        const simResult = await simulateCodeExecution(code, language);
+        result = {
+          success: !simResult.error,
+          output: simResult.output,
+          error: simResult.error,
+          executionTime: Math.round(performance.now() - startTime)
+        };
+      } catch (e) {
+        result = {
+          success: false,
+          output: '',
+          error: `暂不支持 ${language} 语言，且 AI 模拟失败: ${e instanceof Error ? e.message : String(e)}`,
+          executionTime: 0
+        };
+      }
   }
 
   // 运行测试用例

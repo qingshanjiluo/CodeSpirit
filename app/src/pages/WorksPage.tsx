@@ -3,17 +3,19 @@
  */
 
 import { useState, useEffect } from 'react';
-import { 
-  FolderOpen, 
-  Plus, 
-  ExternalLink, 
-  Trash2, 
+import {
+  FolderOpen,
+  Plus,
+  ExternalLink,
+  Trash2,
   Edit3,
   Image as ImageIcon,
   Code2,
   Link as LinkIcon,
   MoreVertical,
-  Upload
+  Upload,
+  Eye,
+  X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,6 +41,7 @@ export function WorksPage({ onNavigate }: WorksPageProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isEditing, setIsEditing] = useState(false);
   const [editingWork, setEditingWork] = useState<Work | null>(null);
+  const [viewingWork, setViewingWork] = useState<Work | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -181,7 +184,8 @@ export function WorksPage({ onNavigate }: WorksPageProps) {
           {filteredWorks.map((work) => (
             <Card
               key={work.id}
-              className="glass-card group overflow-hidden"
+              className="glass-card group overflow-hidden cursor-pointer"
+              onClick={() => setViewingWork(work)}
             >
               {/* 作品预览 */}
               <div className="h-48 bg-slate-800/50 relative overflow-hidden">
@@ -205,16 +209,20 @@ export function WorksPage({ onNavigate }: WorksPageProps) {
                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="bg-slate-900/50">
+                      <Button variant="ghost" size="icon" className="bg-slate-900/50" onClick={(e) => e.stopPropagation()}>
                         <MoreVertical className="w-4 h-4" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="glass-panel">
-                      <DropdownMenuItem onClick={() => { setEditingWork(work); setIsEditing(true); }}>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setViewingWork(work); }}>
+                        <Eye className="w-4 h-4 mr-2" />
+                        查看
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setEditingWork(work); setIsEditing(true); }}>
                         <Edit3 className="w-4 h-4 mr-2" />
                         编辑
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleDeleteWork(work.id)} className="text-red-400">
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteWork(work.id); }} className="text-red-400">
                         <Trash2 className="w-4 h-4 mr-2" />
                         删除
                       </DropdownMenuItem>
@@ -337,6 +345,69 @@ export function WorksPage({ onNavigate }: WorksPageProps) {
                 </Button>
                 <Button onClick={handleSaveWork}>
                   保存
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 查看详情对话框 */}
+      <Dialog open={!!viewingWork} onOpenChange={(open) => !open && setViewingWork(null)}>
+        <DialogContent className="glass-panel max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {viewingWork?.type === 'image' ? (
+                <ImageIcon className="w-5 h-5 text-pink-400" />
+              ) : viewingWork?.type === 'code' ? (
+                <Code2 className="w-5 h-5 text-indigo-400" />
+              ) : (
+                <LinkIcon className="w-5 h-4 text-green-400" />
+              )}
+              {viewingWork?.title || '无标题'}
+            </DialogTitle>
+          </DialogHeader>
+          {viewingWork && (
+            <div className="space-y-4 mt-2">
+              <div className="flex items-center gap-3 text-sm text-slate-400 flex-wrap">
+                {viewingWork.category && (
+                  <Badge variant="secondary">{viewingWork.category}</Badge>
+                )}
+                {viewingWork.language && (
+                  <Badge variant="outline" className="text-xs uppercase">{viewingWork.language}</Badge>
+                )}
+                <span>创建于 {new Date(viewingWork.createdAt).toLocaleDateString()}</span>
+                {viewingWork.tags?.length && (
+                  <div className="flex gap-1 flex-wrap">
+                    {viewingWork.tags.map((tag, i) => (
+                      <Badge key={i} variant="outline" className="text-[10px]">{tag}</Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <p className="text-slate-300 whitespace-pre-wrap">{viewingWork.description || '暂无描述'}</p>
+
+              {/* 内容展示 */}
+              {viewingWork.type === 'image' && viewingWork.content ? (
+                <img src={viewingWork.content} alt={viewingWork.title} className="max-w-full rounded-lg border border-slate-700/40" />
+              ) : viewingWork.type === 'code' ? (
+                <pre className="bg-slate-900/60 border border-slate-700/40 rounded-lg p-4 font-mono text-sm text-slate-300 overflow-x-auto whitespace-pre-wrap">
+                  {viewingWork.content || '无代码内容'}
+                </pre>
+              ) : viewingWork.type === 'link' && viewingWork.content ? (
+                <a href={viewingWork.content} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300">
+                  <ExternalLink className="w-4 h-4" />
+                  {viewingWork.content}
+                </a>
+              ) : null}
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-700/30">
+                <Button variant="outline" onClick={() => setViewingWork(null)}>
+                  <X className="w-4 h-4 mr-2" />关闭
+                </Button>
+                <Button onClick={() => { setEditingWork(viewingWork); setViewingWork(null); setIsEditing(true); }}>
+                  <Edit3 className="w-4 h-4 mr-2" />编辑
                 </Button>
               </div>
             </div>

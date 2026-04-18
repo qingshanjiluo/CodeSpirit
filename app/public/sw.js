@@ -78,6 +78,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // 跳过 Vite 开发服务器内部请求（避免开发模式缓存问题）
+  if (url.pathname.includes('/@') ||
+      url.pathname.includes('/__') ||
+      url.pathname.endsWith('env.mjs')) {
+    return;
+  }
+
   // API请求：网络优先，失败时返回离线提示
   if (url.pathname.startsWith('/api/') || url.hostname.includes('api.')) {
     event.respondWith(networkFirst(request));

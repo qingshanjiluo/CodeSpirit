@@ -3,11 +3,11 @@
  */
 
 import { useState, useEffect } from 'react';
-import { 
-  ArrowLeft, 
-  Play, 
-  Lock, 
-  CheckCircle2, 
+import {
+  ArrowLeft,
+  Play,
+  Lock,
+  CheckCircle2,
   Clock,
   BookOpen,
   Trophy,
@@ -15,7 +15,9 @@ import {
   Edit3,
   Download,
   Share2,
-  Trash2
+  Trash2,
+  Sparkles,
+  Plus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -41,6 +43,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { get, getAllByIndex, remove, put, STORES } from '@/db';
 import { exportCourse } from '@/utils/exportImport';
+import { generateId } from '@/utils';
 import type { Course, Chapter, Progress as ProgressType } from '@/types';
 import type { PageType } from '@/App';
 import { toast } from 'sonner';
@@ -114,6 +117,37 @@ export function CourseDetailPage({ courseId, onNavigate }: CourseDetailPageProps
       console.error('[CourseDetailPage] Export error:', error);
       toast.error('导出失败');
     }
+  };
+
+  const handleGenerateMissingChapters = async () => {
+    if (!course) return;
+    const existingCount = chapters.length;
+    const missingCount = course.totalChapters - existingCount;
+    if (missingCount <= 0) {
+      toast.info('所有章节已生成');
+      return;
+    }
+    const newChapters: Chapter[] = [];
+    for (let i = 0; i < missingCount; i++) {
+      const order = existingCount + i;
+      const newChapter: Chapter = {
+        id: generateId(),
+        courseId: course.id,
+        order,
+        title: `第 ${order + 1} 节`,
+        status: order === existingCount ? 'available' : 'locked',
+        content: '',
+        currentStageIndex: 0,
+        estimatedMinutes: 20,
+        xpReward: 50,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      await put(STORES.CHAPTERS, newChapter);
+      newChapters.push(newChapter);
+    }
+    setChapters((prev) => [...prev, ...newChapters].sort((a, b) => a.order - b.order));
+    toast.success(`已生成 ${missingCount} 个新章节`);
   };
 
   const getChapterStatusIcon = (chapter: Chapter) => {
@@ -245,6 +279,16 @@ export function CourseDetailPage({ courseId, onNavigate }: CourseDetailPageProps
               >
                 <Play className="w-5 h-5 mr-2" />
                 {overallProgress === 0 ? '开始学习' : '继续学习'}
+              </Button>
+            )}
+            {!nextChapter && course.totalChapters > chapters.length && (
+              <Button
+                size="lg"
+                onClick={handleGenerateMissingChapters}
+                className="bg-gradient-to-r from-amber-500 to-orange-600"
+              >
+                <Sparkles className="w-5 h-5 mr-2" />
+                生成后续章节
               </Button>
             )}
           </div>
